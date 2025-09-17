@@ -1,4 +1,3 @@
-// Estado do jogo
 let gameState = {
     player: {
         name: '',
@@ -496,4 +495,361 @@ function enemyAttack() {
     
     if (target === 'ghost') {
         gameState.summons.ghost.hp -= damage;
-        addMessage(`${enemy.name} causou ${damage} de dano ao seu fantasma!`'combat');
+        addMessage(`${enemy.name} causou ${damage} de dano ao seu fantasma!`, 'combat');
+        
+        if (gameState.summons.ghost.hp <= 0) {
+            addMessage('Seu fantasma foi destruído!', 'combat');
+            gameState.summons.ghost = null;
+        }
+    } else {
+        gameState.player.hp -= damage;
+        addMessage(`${enemy.name} causou ${damage} de dano em você!`, 'combat');
+        
+        if (gameState.player.hp <= 0) {
+            // Reviver automático do necromante
+            if (gameState.player.class === 'Necromante' && gameState.statusEffects.reviveReady) {
+                gameState.player.hp = 5;
+                gameState.statusEffects.reviveReady = false;
+                gameState.statusEffects.reviveCooldown = 2;
+                addMessage('Você foi revivido magicamente com 5 HP!', 'success');
+            } else {
+                defeat();
+                return;
+            }
+        }
+    }
+    
+    updateTurnEffects();
+    updateUI();
+    updateCombatDisplay();
+}
+
+// Atualizar efeitos por turno
+function updateTurnEffects() {
+    if (gameState.statusEffects.bearForm > 0) {
+        gameState.statusEffects.bearForm--;
+        if (gameState.statusEffects.bearForm === 0) {
+            addMessage('Você voltou à forma normal.', 'info');
+        }
+    }
+    
+    if (gameState.statusEffects.reviveCooldown > 0) {
+        gameState.statusEffects.reviveCooldown--;
+        if (gameState.statusEffects.reviveCooldown === 0) {
+            gameState.statusEffects.reviveReady = true;
+            addMessage('Reviver está novamente disponível!', 'info');
+        }
+    }
+}
+
+// Atualizar display de combate
+function updateCombatDisplay() {
+    const enemy = gameState.currentEnemy;
+    document.getElementById('gameContent').innerHTML = `
+        <div class="combat-area">
+            <div class="character-card">
+                <div class="character-avatar">${gameState.player.classEmoji}</div>
+                <h3>${gameState.player.name}</h3>
+                <div>HP: ${gameState.player.hp}/${gameState.player.maxHP}</div>
+                <div>Ataque: ${gameState.statusEffects.bearForm > 0 ? gameState.player.attack + 15 : gameState.player.attack}</div>
+                <div>Defesa: ${gameState.player.defense}</div>
+            </div>
+            <div class="enemy-card">
+                <div class="enemy-avatar">${enemy.emoji}</div>
+                <h3>${enemy.name}</h3>
+                <div>HP: ${enemy.hp}</div>
+                <div>Ataque: ${enemy.attack}</div>
+                <div>Defesa: ${enemy.defense}</div>
+            </div>
+        </div>
+        <p>A batalha continua! Escolha sua próxima ação.</p>
+    `;
+}
+
+// Lançar magia
+function castSpell(spellType) {
+    const spell = spells[spellType];
+    
+    if (gameState.player.mp < spell.cost) {
+        addMessage('Você não tem mana suficiente!', 'info');
+        return;
+    }
+    
+    if (spellType === 'revive' && gameState.statusEffects.reviveCooldown > 0) {
+        addMessage(`Reviver em cooldown! Aguarde ${gameState.statusEffects.reviveCooldown} turnos.`, 'info');
+        return;
+    }
+
+    gameState.player.mp -= spell.cost;
+    const enemy = gameState.currentEnemy;
+    
+    switch (spell.type) {
+        case 'damage':
+            const damage = Math.floor(Math.random() * (spell.damage[1] - spell.damage[0] + 1)) + spell.damage[0];
+            const finalDamage = Math.max(1, damage - enemy.defense);
+            enemy.hp -= finalDamage;
+            addMessage(`${spell.name} causou ${finalDamage} de dano!`, 'combat');
+            break;
+            
+        case 'summon':
+            gameState.summons.ghost = { hp: 25, attack: 12 };
+            addMessage('Você invocou um fantasma!', 'success');
+            break;
+            
+        case 'curse':
+            const curseDamage = Math.floor(Math.random() * (spell.damage[1] - spell.damage[0] + 1)) + spell.damage[0];
+            const finalCurseDamage = Math.max(1, curseDamage - enemy.defense);
+            enemy.hp -= finalCurseDamage;
+            enemy.attack = Math.max(1, enemy.attack - 3);
+            addMessage(`Maldição causou ${finalCurseDamage} de dano e enfraqueceu o inimigo!`, 'combat');
+            break;
+            
+        case 'lifedrain':
+            const drainDamage = Math.floor(Math.random() * (spell.damage[1] - spell.damage[0] + 1)) + spell.damage[0];
+            const finalDrainDamage = Math.max(1, drainDamage - enemy.defense);
+            enemy.hp -= finalDrainDamage;
+            const healAmount = Math.floor(finalDrainDamage * 0.6);
+            gameState.player.hp = Math.min(gameState.player.maxHP, gameState.player.hp + healAmount);
+            addMessage(`Sugou ${finalDrainDamage} de vida e recuperou ${healAmount} HP!`, 'combat');
+            break;
+            
+        case 'revive':
+            gameState.statusEffects.reviveReady = true;
+            addMessage('Preparou-se para reviver em caso de morte!', 'success');
+            break;
+            
+        case 'heal':
+            const healingAmount = Math.floor(Math.random() * (spell.heal[1] - spell.heal[0] + 1)) + spell.heal[0];
+            gameState.player.hp = Math.min(gameState.player.maxHP, gameState.player.hp + healingAmount);
+            addMessage(`Cura da natureza restaurou ${healingAmount} HP!`, 'success');
+            break;
+            
+        case 'transform':
+            gameState.statusEffects.bearForm = 3;
+            addMessage('Transformou-se em urso! +15 ataque por 3 turnos!', 'success');
+            break;
+    }
+
+    if (enemy.hp <= 0) {
+        victory();
+        return;
+    }
+
+    enemyAttack();
+}
+
+// Usar item
+function useItem(itemType) {
+    if (!gameState.inventory[itemType] || gameState.inventory[itemType] <= 0) {
+        addMessage(`Você não tem ${shopItems[itemType]?.name || itemType}!`, 'info');
+        return;
+    }
+
+    if (itemType === 'potion') {
+        const healAmount = 40;
+        gameState.player.hp = Math.min(gameState.player.maxHP, gameState.player.hp + healAmount);
+        gameState.inventory[itemType]--;
+        addMessage(`Poção restaurou ${healAmount} HP!`, 'success');
+    } else if (itemType === 'manaPotion') {
+        const manaAmount = 30;
+        gameState.player.mp = Math.min(gameState.player.maxMP, gameState.player.mp + manaAmount);
+        gameState.inventory[itemType]--;
+        addMessage(`Poção de mana restaurou ${manaAmount} MP!`, 'success');
+    }
+    
+    updateUI();
+    updateInventoryDisplay();
+    
+    if (gameState.inCombat) {
+        enemyAttack();
+    }
+}
+
+// Defender
+function defend() {
+    addMessage('Você se defendeu!', 'info');
+    
+    const enemy = gameState.currentEnemy;
+    const damage = Math.max(1, Math.floor((enemy.attack - gameState.player.defense) / 2));
+    
+    gameState.player.hp -= damage;
+    addMessage(`Defesa reduziu o dano para ${damage}!`, 'combat');
+
+    if (gameState.player.hp <= 0) {
+        if (gameState.player.class === 'Necromante' && gameState.statusEffects.reviveReady) {
+            gameState.player.hp = 5;
+            gameState.statusEffects.reviveReady = false;
+            gameState.statusEffects.reviveCooldown = 2;
+            addMessage('Revivido magicamente com 5 HP!', 'success');
+        } else {
+            defeat();
+            return;
+        }
+    }
+
+    updateTurnEffects();
+    updateUI();
+    updateCombatDisplay();
+}
+
+// Fugir
+function flee() {
+    if (Math.random() > 0.3) {
+        addMessage('Você fugiu com sucesso!', 'success');
+        endCombat();
+    } else {
+        addMessage('Não conseguiu fugir!', 'combat');
+        enemyAttack();
+    }
+}
+
+// Vitória
+function victory() {
+    const enemy = gameState.currentEnemy;
+    gameState.player.xp += enemy.xp;
+    gameState.player.gold += enemy.gold;
+
+    addMessage(`Derrotou ${enemy.name}! +${enemy.xp} XP, +${enemy.gold} ouro`, 'success');
+
+    checkLevelUp();
+    endCombat();
+}
+
+// Derrota
+function defeat() {
+    gameState.player.hp = 1;
+    gameState.player.gold = Math.max(0, gameState.player.gold - 20);
+    
+    gameState.statusEffects.bearForm = 0;
+    gameState.summons.ghost = null;
+    
+    addMessage('Você foi derrotado! -20 ouro', 'combat');
+    gameState.location = 'town';
+    endCombat();
+}
+
+// Verificar level up
+function checkLevelUp() {
+    if (gameState.player.xp >= gameState.player.xpToNext) {
+        gameState.player.level++;
+        gameState.player.xp -= gameState.player.xpToNext;
+        gameState.player.xpToNext = gameState.player.level * 100;
+        
+        gameState.player.maxHP += 20;
+        gameState.player.hp = gameState.player.maxHP;
+        gameState.player.maxMP += 10;
+        gameState.player.mp = gameState.player.maxMP;
+        gameState.player.attack += 3;
+        gameState.player.defense += 2;
+
+        addMessage(`Level Up! Agora nível ${gameState.player.level}!`, 'success');
+    }
+}
+
+// Terminar combate
+function endCombat() {
+    gameState.inCombat = false;
+    gameState.currentEnemy = null;
+
+    document.getElementById('gameContent').innerHTML = `
+        <p>O combate terminou. Continue sua aventura!</p>
+    `;
+
+    document.getElementById('actionButtons').innerHTML = `
+        <button class="btn btn-primary" onclick="explore()">🗺️ Explorar</button>
+        <button class="btn btn-danger" onclick="findEnemy()">⚔️ Procurar Inimigo</button>
+        <button class="btn btn-success" onclick="rest()">🏠 Descansar</button>
+        <button class="btn btn-primary" onclick="shop()">🛒 Loja</button>
+    `;
+
+    updateUI();
+}
+
+// Descansar
+function rest() {
+    const hpRestored = Math.min(gameState.player.maxHP - gameState.player.hp, 50);
+    const mpRestored = Math.min(gameState.player.maxMP - gameState.player.mp, 30);
+    
+    gameState.player.hp += hpRestored;
+    gameState.player.mp += mpRestored;
+
+    document.getElementById('gameContent').innerHTML = `
+        <p>Você descansou em um local seguro.</p>
+        <p>HP restaurado: ${hpRestored}</p>
+        <p>MP restaurado: ${mpRestored}</p>
+        <p>Você se sente revigorado!</p>
+    `;
+
+    addMessage(`Descansou: +${hpRestored} HP, +${mpRestored} MP`, 'success');
+    updateUI();
+}
+
+// Loja
+function shop() {
+    let shopHTML = `
+        <h3>🛒 Loja do Aventureiro</h3>
+        <p>Compre itens úteis para sua jornada!</p>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 20px;">
+    `;
+    
+    Object.keys(shopItems).forEach(itemKey => {
+        const item = shopItems[itemKey];
+        shopHTML += `
+            <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px;">
+                <div style="font-size: 2rem; text-align: center;">${item.emoji}</div>
+                <h4>${item.name}</h4>
+                <p>${item.description}</p>
+                <p><strong>Preço: ${item.price} ouro</strong></p>
+                <button class="btn btn-success" onclick="buyItem('${itemKey}')" style="width: 100%; margin-top: 10px;">Comprar</button>
+            </div>
+        `;
+    });
+    
+    shopHTML += '</div>';
+    document.getElementById('gameContent').innerHTML = shopHTML;
+}
+
+// Comprar item
+function buyItem(itemType) {
+    const item = shopItems[itemType];
+    
+    if (gameState.player.gold < item.price) {
+        addMessage('Ouro insuficiente!', 'info');
+        return;
+    }
+
+    gameState.player.gold -= item.price;
+
+    if (gameState.inventory[itemType]) {
+        gameState.inventory[itemType]++;
+    } else {
+        gameState.inventory[itemType] = 1;
+    }
+
+    // Aplicar efeitos de equipamentos
+    if (item.effect) {
+        if (item.effect === 'attack') {
+            gameState.player.attack += item.value;
+            gameState.inventory[itemType] = 0;
+            addMessage(`${item.name} equipado! +${item.value} Ataque`, 'success');
+        } else if (item.effect === 'defense') {
+            gameState.player.defense += item.value;
+            gameState.inventory[itemType] = 0;
+            addMessage(`${item.name} equipado! +${item.value} Defesa`, 'success');
+        } else if (item.effect === 'maxHP') {
+            gameState.player.maxHP += item.value;
+            gameState.player.hp += item.value;
+            gameState.inventory[itemType] = 0;
+            addMessage(`${item.name} equipado! +${item.value} HP máximo`, 'success');
+        }
+    } else {
+        addMessage(`Comprou ${item.name} por ${item.price} ouro!`, 'success');
+    }
+    
+    updateUI();
+    updateInventoryDisplay();
+}
+
+// Inicialização do jogo
+updateUI();
+updateInventoryDisplay();
